@@ -1,0 +1,53 @@
+---
+# Wave 1 of 2: namespace, SCC, ServiceAccounts, SCC RoleBinding, Route,
+# NetworkPolicies. Must converge before the Helm Application, otherwise the
+# first Artifactory pod is admitted under restricted-v2 and rejected.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jfrog-jcr-platform
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: jfrog-container-registry
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: jfrog-jcr
+
+  source:
+    repoURL: https://github.com/sholly/jfrog-container-registry-gitops.git
+    targetRevision: main
+    path: platform
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jfrog-jcr
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      # Refuse to sync if the source ever renders zero manifests -- a bad path
+      # or a broken kustomization would otherwise prune the Namespace, and
+      # deleting the Namespace takes the registry's PVCs with it.
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - PruneLast=false
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+  # The Route's host is defaulted by OpenShift when left empty and the status
+  # block is written by the router; neither should ever show as drift.
+  ignoreDifferences:
+    - group: route.openshift.io
+      kind: Route
+      jsonPointers:
+        - /status

@@ -1,0 +1,24 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jfrog-jcr
+  labels:
+    app.kubernetes.io/part-of: jfrog-container-registry
+    # Pod Security Admission runs alongside SCC, so both must allow these pods.
+    #
+    # 'baseline' is the deliberate choice. Every container and init container in
+    # the rendered chart is in fact restricted-compliant (non-root, ALL caps
+    # dropped, no privilege escalation), but seccompProfile is set per-container
+    # rather than at pod level, and a single container missing a required field
+    # would be rejected at admission and stall the rollout.
+    #
+    # audit/warn are set to 'restricted' so any real violation is reported
+    # without blocking. Check for warnings after the first successful deploy,
+    # and if there are none, tighten enforce to 'restricted'.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    openshift.io/display-name: "JFrog Container Registry"
+    argocd.argoproj.io/sync-wave: "-10"

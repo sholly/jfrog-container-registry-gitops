@@ -1,0 +1,44 @@
+---
+# Grants 'use' on the built-in nonroot-v2 SCC to the two ServiceAccounts that
+# run JFrog workloads.
+#
+# Why nonroot-v2 and not a custom SCC:
+#
+# The JFrog images declare fixed numeric users -- artifactory 1030, frontend
+# 1031, jfbus 1127, postgres 1001 -- and the chart sets runAsUser/fsGroup to
+# match. The default restricted-v2 SCC uses runAsUser MustRunAsRange and
+# rejects every one of them, because they fall outside the range OpenShift
+# allocates to this namespace.
+#
+# nonroot-v2 relaxes exactly the two checks that matter (runAsUser becomes
+# MustRunAsNonRoot, fsGroup becomes RunAsAny) and keeps everything else
+# restricted-v2 enforces: no host namespaces, no host ports, no privileged
+# containers, no privilege escalation, ALL capabilities dropped, RuntimeDefault
+# seccomp, namespace-assigned SELinux context, same volume allowlist.
+#
+# This is both simpler and stricter than hand-rolling an SCC. A custom SCC with
+# 'runAsUser: RunAsAny' -- the usual approach, and what 'anyuid' does -- would
+# also permit UID 0. nonroot-v2 forbids root outright, and none of these images
+# need it: every container and init container in the rendered chart runs
+# non-root with capabilities dropped.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jfrog-jcr-scc-nonroot
+  namespace: jfrog-jcr
+  labels:
+    app.kubernetes.io/part-of: jfrog-container-registry
+  annotations:
+    argocd.argoproj.io/sync-wave: "-7"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  # Shipped with OpenShift; not managed by this repo.
+  name: system:openshift:scc:nonroot-v2
+subjects:
+  - kind: ServiceAccount
+    name: jfrog-jcr
+    namespace: jfrog-jcr
+  - kind: ServiceAccount
+    name: jfrog-jcr-postgresql
+    namespace: jfrog-jcr

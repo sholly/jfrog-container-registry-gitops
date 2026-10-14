@@ -1,0 +1,45 @@
+---
+# The app-of-apps root. This is the only manifest applied by hand:
+#
+#   oc apply -f bootstrap/root-application.yaml
+#
+# It syncs gitops/, which contains the AppProject and the two child
+# Applications. From that point on every change is a git commit.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jfrog-jcr-bootstrap
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: jfrog-container-registry
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # The root lives in the built-in 'default' project because it has to create
+  # the jfrog-jcr AppProject that the children use -- a project cannot be the
+  # thing that authorises its own creation.
+  project: default
+
+  source:
+    repoURL: https://github.com/sholly/jfrog-container-registry-gitops.git
+    targetRevision: main
+    path: gitops
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openshift-gitops
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

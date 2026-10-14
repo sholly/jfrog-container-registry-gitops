@@ -1,0 +1,36 @@
+---
+# Single entry point for both the web UI and the Docker registry API.
+#
+# Targets the Artifactory router on 8082 (service jcr-artifactory, port
+# http-router), not the legacy Artifactory port 8081. The router is what
+# serves /ui, /artifactory and the Docker /v2 endpoints.
+#
+# The Route is created in the platform wave and may exist before the Helm
+# Application has created the Service. OpenShift tolerates that -- the Route
+# returns 503 until the Service and endpoints appear.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: jfrog-jcr
+  namespace: jfrog-jcr
+  labels:
+    app.kubernetes.io/name: artifactory
+    app.kubernetes.io/part-of: jfrog-container-registry
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+    # Docker layer pushes and pulls are long-lived single requests. The
+    # OpenShift router's default 30s timeout will abort large layer transfers
+    # mid-flight and surface as retried/failed pushes, so raise it.
+    haproxy.router.openshift.io/timeout: 600s
+spec:
+  host: jcr.apps.ocprod.303.tube
+  to:
+    kind: Service
+    name: jcr-artifactory
+    weight: 100
+  port:
+    targetPort: http-router
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

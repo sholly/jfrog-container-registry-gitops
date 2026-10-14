@@ -1,0 +1,44 @@
+# =============================================================================
+# Cluster overlay: ocprod  (apps.ocprod.303.tube)
+#
+# Applied after values-common.yaml. Only values genuinely specific to this
+# cluster belong here: storage class, capacity, and hostname-derived settings.
+# =============================================================================
+artifactory:
+
+  artifactory:
+    persistence:
+      size: 200Gi
+      # nfs-client is the only StorageClass on this cluster (NFS subdir
+      # provisioner, default). Artifactory's filestore on NFS is a supported
+      # and common configuration.
+      storageClassName: nfs-client
+
+  postgresql:
+    primary:
+      persistence:
+        size: 50Gi
+        # IMPORTANT: a PostgreSQL data directory on NFS is the weak point of
+        # this deployment, not Artifactory's filestore. See docs/storage.md --
+        # this is the single thing to revisit before calling this production.
+        storageClass: nfs-client
+
+  # ---------------------------------------------------------------------------
+  # External URL
+  #
+  # There is deliberately no base-URL value here: Artifactory has no
+  # system.yaml setting for it. The base URL is runtime configuration stored in
+  # the database (Administration -> General -> Custom Base URL).
+  #
+  # It usually does not need to be set. The OpenShift Route terminates TLS at
+  # the edge and HAProxy forwards X-Forwarded-Proto/X-Forwarded-Host, which
+  # Artifactory's router uses to build redirects and the Docker token-auth
+  # 'realm' URL. Set the Custom Base URL explicitly to
+  # https://jcr.apps.ocprod.303.tube only if you see http:// URLs or
+  # internal hostnames leaking into Docker login or redirect responses.
+  # ---------------------------------------------------------------------------
+
+  # Reserved for future cluster-specific system.yaml additions. Merged over
+  # the chart's files/system.yaml.
+  #   artifactory:
+  #     extraSystemYaml: {}

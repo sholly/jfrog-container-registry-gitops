@@ -1,0 +1,18 @@
+# Rendered output from local validation — never committed, the Applications
+# render from source.
+/tmp/
+*.rendered.yaml
+rendered/
+
+# Helm working files, in case a chart is ever pulled locally for diffing.
+charts/
+Chart.lock
+*.tgz
+
+# Secrets must never be committed. scripts/create-secrets.sh creates them
+# directly in the cluster; see docs/secrets.md.
+*secret*.yaml
+!platform/sealedsecret-*.yaml
+secrets/
+
+.DS_Store

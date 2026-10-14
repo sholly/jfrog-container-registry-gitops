@@ -1,0 +1,215 @@
+# =============================================================================
+# JFrog Container Registry (JCR) -- OpenShift baseline
+# Chart: jfrog/artifactory-jcr
+#
+# Everything in the JCR chart lives under the top-level `artifactory:` key,
+# because artifactory-jcr is a thin wrapper around the artifactory chart.
+# Cluster-specific values (storage class, hostnames, sizes) live in the
+# values-<cluster>.yaml overlay, which is applied after this file.
+# =============================================================================
+artifactory:
+
+  # ---------------------------------------------------------------------------
+  # Cluster keys. Both are read from a pre-existing Secret created out-of-band
+  # (see scripts/create-secrets.sh) and NEVER committed.
+  #
+  # This matters more than it looks: if the chart generates the master key, a
+  # Helm render has no way to recover the previous value, so every ArgoCD sync
+  # would mint a new key. A changed master key makes all stored credentials and
+  # encrypted config in the database unreadable. Pinning it to a Secret is what
+  # makes this chart safe to run under GitOps at all.
+  # ---------------------------------------------------------------------------
+  global:
+    masterKeySecretName: jfrog-jcr-keys
+    joinKeySecretName: jfrog-jcr-keys
+
+  # ---------------------------------------------------------------------------
+  # ServiceAccount. Pre-created in the platform Application so that the SCC
+  # RoleBinding is in place before any pod is admitted.
+  # ---------------------------------------------------------------------------
+  serviceAccount:
+    create: false
+    name: jfrog-jcr
+  rbac:
+    create: false
+
+  # ---------------------------------------------------------------------------
+  # nginx is disabled. The chart's nginx only adds value for the Docker
+  # "subdomain" method, which needs wildcard DNS plus WildcardsAllowed on the
+  # OpenShift ingress controller. We expose the Artifactory router (8082)
+  # directly through an edge-terminated Route and use the repository-path
+  # method instead.
+  #
+  # Dropping nginx also removes a hop from every artifact transfer, and removes
+  # its UID 104 from the set of users needing an SCC exception -- nginx is the
+  # one component here that would otherwise want to bind a privileged port.
+  # ---------------------------------------------------------------------------
+  nginx:
+    enabled: false
+
+  # Native Ingress is off; OpenShift Routes are managed in platform/route.yaml.
+  ingress:
+    enabled: false
+
+  # ---------------------------------------------------------------------------
+  # Artifactory
+  # ---------------------------------------------------------------------------
+  artifactory:
+    image:
+      registry: releases-docker.jfrog.io
+      repository: jfrog/artifactory-jcr
+      pullPolicy: IfNotPresent
+
+    replicaCount: 1
+
+    # Single unified Secret for all chart-managed secrets (chart default).
+    unifiedSecretInstallation: true
+
+    # Fixed image UID. Permitted by the built-in nonroot-v2 SCC, bound to the
+    # jfrog-jcr ServiceAccount in platform/rbac.yaml.
+    podSecurityContext:
+      enabled: true
+      runAsUser: 1030
+      runAsGroup: 1030
+      fsGroup: 1030
+      # NFS-backed volumes: recursive chown on every start is slow once the
+      # filestore grows. OnRootMismatch only fixes permissions when the volume
+      # root is wrong, which is what we actually need.
+      fsGroupChangePolicy: "OnRootMismatch"
+
+    containerSecurityContext:
+      enabled: true
+      runAsNonRoot: true
+      privileged: false
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: "RuntimeDefault"
+
+    persistence:
+      enabled: true
+      type: file-system
+      accessMode: ReadWriteOnce
+      # size / storageClassName come from the cluster overlay.
+
+    # Artifactory is slow to start; it migrates the schema on first boot.
+    # The chart's default startup budget is tight for NFS-backed storage.
+    startupProbe:
+      enabled: true
+      failureThreshold: 120
+      periodSeconds: 5
+
+    # Sized for a small-to-medium internal registry. Keep
+    # resources.limits.memory at least 1Gi above javaOpts.xmx -- the JVM needs
+    # headroom for metaspace, threads and direct buffers, and the container is
+    # OOM-killed, not the JVM, if it does not have it.
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "4Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+    javaOpts:
+      xms: "2g"
+      xmx: "6g"
+
+  # ---------------------------------------------------------------------------
+  # Bundled PostgreSQL
+  # ---------------------------------------------------------------------------
+  postgresql:
+    enabled: true
+
+    serviceAccount:
+      create: false
+      name: jfrog-jcr-postgresql
+
+    auth:
+      username: artifactory
+      database: artifactory
+      # Credentials come from the same out-of-band Secret workflow.
+      existingSecret: jfrog-jcr-postgresql
+      secretKeys:
+        adminPasswordKey: postgres-password
+        userPasswordKey: password
+
+    primary:
+      podSecurityContext:
+        enabled: true
+        fsGroup: 1001
+        fsGroupChangePolicy: "OnRootMismatch"
+      containerSecurityContext:
+        enabled: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        runAsNonRoot: true
+        privileged: false
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: "RuntimeDefault"
+
+      extendedConfiguration: |
+        listen_addresses = '*'
+        max_connections = 600
+
+      resourcesPreset: "none"
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "1Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+      persistence:
+        enabled: true
+        # size / storageClass come from the cluster overlay.
+
+  # ---------------------------------------------------------------------------
+  # Microservices that the chart renders as their own Deployments rather than
+  # containers in the StatefulSet (frontend.asPod and jfbus are both on by
+  # default in 107.161.x).
+  #
+  # These templates only set serviceAccountName if you give them one --
+  # otherwise the pods land on the namespace 'default' ServiceAccount, which is
+  # NOT bound to nonroot-v2, and restricted-v2 rejects their fixed UIDs
+  # (frontend 1031, jfbus 1127) with a MustRunAsRange error. Pinning them to
+  # the bound ServiceAccount is required, not cosmetic.
+  # ---------------------------------------------------------------------------
+  frontend:
+    serviceAccountName: jfrog-jcr
+  jfbus:
+    serviceAccountName: jfrog-jcr
+
+  # Required acknowledgement for PostgreSQL subchart upgrades.
+  databaseUpgradeReady: "yes"
+
+  # ---------------------------------------------------------------------------
+  # Everything below is JFrog Platform / commercial surface that JCR does not
+  # serve. Explicitly off, so an upstream default flip cannot quietly schedule
+  # pods we neither want nor licensed.
+  # ---------------------------------------------------------------------------
+  splitServicesToContainers: true
+  jfconnect:
+    enabled: false
+  jfmelt:
+    enabled: false
+  rtfs:
+    enabled: false
+  onemodel:
+    enabled: false
+  evidence:
+    enabled: false
+  apptrust:
+    enabled: false
+  unifiedpolicy:
+    enabled: false
+  platformfederation:
+    enabled: false
+  filebeat:
+    enabled: false

@@ -1,0 +1,48 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: jfrog-jcr
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: jfrog-container-registry
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: JFrog Container Registry (OSS) platform and workload
+
+  # Only these two sources may be deployed by this project.
+  sourceRepos:
+    - https://github.com/sholly/jfrog-container-registry-gitops.git
+    - https://charts.jfrog.io
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: jfrog-jcr
+    # The Namespace object itself is cluster-scoped; ArgoCD still evaluates it
+    # against a destination, so the project must permit an empty namespace.
+    - server: https://kubernetes.default.svc
+      namespace: ""
+
+  # Deliberately narrow: the Namespace is the only cluster-scoped object this
+  # project creates. Binding the built-in nonroot-v2 SCC (rather than defining
+  # a custom one) means the project needs no permission over
+  # SecurityContextConstraints or ClusterRoles at all.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # Prevent this project from being used to grant itself more RBAC. The one
+  # RoleBinding it does need (SCC use) is namespaced and explicitly allowed.
+  namespaceResourceBlacklist:
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+
+  orphanedResources:
+    warn: true

@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The Namespace is cluster-scoped, so the ArgoCD Application that syncs this
+# kustomization is non-namespaced. The openshift-gitops application-controller
+# holds cluster-admin, so it can create it.
+#
+# No SecurityContextConstraints object is defined here on purpose -- this
+# deployment binds the built-in nonroot-v2 SCC instead. See rbac.yaml.
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - rbac.yaml
+  - route.yaml
+  - networkpolicy.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: jfrog-container-registry
+      app.kubernetes.io/managed-by: openshift-gitops

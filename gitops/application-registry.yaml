@@ -1,0 +1,72 @@
+---
+# Wave 2 of 2: the JFrog Container Registry Helm chart.
+#
+# Multi-source Application: the chart comes straight from JFrog's public Helm
+# repo (nothing vendored, so bumping a version is a one-line change), while the
+# values files are read from this Git repo via the $values ref.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jfrog-jcr-registry
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: jfrog-container-registry
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: jfrog-jcr
+
+  sources:
+    - repoURL: https://charts.jfrog.io
+      chart: artifactory-jcr
+      targetRevision: 107.161.26
+      helm:
+        # Must stay "jcr": the chart templates the database URL as
+        # <release-name>-postgresql, and platform/route.yaml targets the
+        # Service jcr-artifactory. Renaming the release breaks both.
+        releaseName: jcr
+        valueFiles:
+          - $values/registry/values/values-common.yaml
+          - $values/registry/values/values-ocprod.yaml
+    - repoURL: https://github.com/sholly/jfrog-container-registry-gitops.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jfrog-jcr
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      # Only send resources that actually differ. This chart renders large
+      # ConfigMaps and a StatefulSet on every reconcile; skipping in-sync
+      # objects keeps syncs cheap and avoids needless pod-template churn.
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+
+  ignoreDifferences:
+    # A StatefulSet's volumeClaimTemplates are immutable after creation. If a
+    # capacity value in the overlay is ever edited, ArgoCD would otherwise
+    # report permanent drift it cannot resolve. See docs/storage.md#resizing.
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/volumeClaimTemplates
+    # status is written by the controller, never by the manifest.
+    - group: policy
+      kind: PodDisruptionBudget
+      jsonPointers:
+        - /status
