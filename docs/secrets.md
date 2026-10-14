@@ -8,7 +8,17 @@ Two Secrets are required and are deliberately **not** in Git.
 | `jfrog-jcr-postgresql` | `postgres-password`, `password` | PostgreSQL, Artifactory |
 
 Wired in `values-common.yaml` via `global.masterKeySecretName`,
-`global.joinKeySecretName` and `postgresql.auth.existingSecret`.
+`global.joinKeySecretName`, `postgresql.auth.existingSecret` **and**
+`database.secrets.password`.
+
+The last two both point at `jfrog-jcr-postgresql` and both are needed.
+`postgresql.auth.existingSecret` is read only by the bundled PostgreSQL
+subchart; Artifactory's own containers get `JF_SHARED_DATABASE_PASSWORD` from a
+separate lookup that, with `postgresql.enabled: true`, falls back to a
+hardcoded `<release-name>-postgresql` -- `jcr-postgresql` -- and ignores
+`existingSecret`. Without `database.secrets.password` the Artifactory pods stay
+in `CreateContainerConfigError` on a missing `jcr-postgresql` Secret while
+PostgreSQL itself comes up fine.
 
 ## Why the master key cannot be chart-generated
 

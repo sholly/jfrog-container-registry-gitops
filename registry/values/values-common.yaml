@@ -117,6 +117,23 @@ artifactory:
       xmx: "6g"
 
   # ---------------------------------------------------------------------------
+  # Database credentials
+  #
+  # postgresql.auth.existingSecret below is read only by the bundled PostgreSQL
+  # subchart. Artifactory's own containers take JF_SHARED_DATABASE_PASSWORD from
+  # a separate lookup that, when postgresql.enabled is true, defaults to the
+  # hardcoded "<release-name>-postgresql" (i.e. jcr-postgresql) and ignores
+  # existingSecret entirely. Pointing database.secrets.password at the real
+  # Secret is the only supported way to override it, and it applies to the
+  # Artifactory StatefulSet and every sidecar deployment in the chart.
+  # ---------------------------------------------------------------------------
+  database:
+    secrets:
+      password:
+        name: jfrog-jcr-postgresql
+        key: password
+
+  # ---------------------------------------------------------------------------
   # Bundled PostgreSQL
   # ---------------------------------------------------------------------------
   postgresql:
